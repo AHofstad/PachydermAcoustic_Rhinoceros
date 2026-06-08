@@ -285,6 +285,284 @@ namespace Pachyderm_Acoustic
             }
         }
 
+        [System.Runtime.InteropServices.Guid("8F2F9D3E-9A31-4C37-9A6E-7D89386B6B9E")]
+        public class PachSteerableArraySourceCommand : Command
+        {
+            public override string EnglishName
+            {
+                get { return "Pach_Steerable_Array_Source"; }
+            }
+
+            protected override Result RunCommand(Rhino.RhinoDoc doc, RunMode mode)
+            {
+                Rhino.DocObjects.ObjRef[] objRefs;
+
+                Result rc = Rhino.Input.RhinoGet.GetMultipleObjects(
+                    "Select source objects to assemble into a steerable speaker array...",
+                    false,
+                    Rhino.DocObjects.ObjectType.Point,
+                    out objRefs);
+
+                if (rc != Result.Success || objRefs == null || objRefs.Length == 0)
+                {
+                    return rc;
+                }
+
+                List<Rhino.DocObjects.RhinoObject> sources =
+                    new List<Rhino.DocObjects.RhinoObject>();
+
+                for (int i = 0; i < objRefs.Length; i++)
+                {
+                    Rhino.DocObjects.RhinoObject obj = objRefs[i].Object();
+
+                    if (obj == null || obj.Geometry == null) continue;
+                    if (obj.Attributes.Name != "Acoustical Source") continue;
+
+                    sources.Add(obj);
+                }
+
+                if (sources.Count == 0)
+                {
+                    Rhino.RhinoApp.WriteLine("No acoustical source objects selected.");
+                    return Result.Cancel;
+                }
+
+                string groupLabel = NextArrayLabel(sources);
+                rc = Rhino.Input.RhinoGet.GetString("Array label", true, ref groupLabel);
+
+                if (rc != Result.Success)
+                {
+                    return rc;
+                }
+
+                bool sortByElevation = true;
+                Rhino.Input.RhinoGet.GetBool(
+                    "Sort elements by elevation before labeling?",
+                    true,
+                    "No",
+                    "Yes",
+                    ref sortByElevation);
+
+                if (sortByElevation)
+                {
+                    sources.Sort((a, b) =>
+                    {
+                        double az = SourcePoint(a).Z;
+                        double bz = SourcePoint(b).Z;
+                        return bz.CompareTo(az);
+                    });
+                }
+
+                Guid arrayGroup = Guid.NewGuid();
+
+                List<Guid> groupIds = new List<Guid>();
+
+                for (int i = 0; i < sources.Count; i++)
+                {
+                    Rhino.DocObjects.RhinoObject obj = sources[i];
+
+                    AssignSteerableArrayMetadata(
+                        obj,
+                        arrayGroup,
+                        groupLabel,
+                        i);
+
+                    groupIds.Add(obj.Id);
+
+                    SourceConduit.Instance.SetSource(obj);
+
+                    if (obj == null) continue;
+
+                    bool found = false;
+
+                    foreach (System.Guid id in SourceConduit.Instance.UUID)
+                    {
+                        if (id == obj.Id)
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+
+                    if (!found)
+                    {
+                        SourceConduit.Instance.SetSource(obj);
+                    }
+                    Rhino.RhinoDoc.ActiveDoc.Views.Redraw();
+                }
+
+                // Rhino group for convenient selection only.
+                doc.Groups.Add(groupIds);
+
+                doc.Views.Redraw();
+
+                Rhino.RhinoApp.WriteLine(
+                    "Created Steerable speaker array {0} with {1} elements.",
+                    groupLabel,
+                    sources.Count);
+
+                return Result.Success;
+            }
+
+            private static void AssignSteerableArrayMetadata(
+                Rhino.DocObjects.RhinoObject obj,
+                Guid arrayGroup,
+                string groupLabel,
+                int elementIndex)
+            {
+                string suffix = AlphabeticSuffix(elementIndex);
+                string label = groupLabel + suffix;
+
+                obj.Geometry.SetUserString("ArrayGroup", arrayGroup.ToString());
+                obj.Geometry.SetUserString("ArrayMode", "Steerable");
+                obj.Geometry.SetUserString("ArrayGroupLabel", groupLabel);
+                obj.Geometry.SetUserString("ArrayElementIndex", elementIndex.ToString());
+                obj.Geometry.SetUserString("ArrayElementSuffix", suffix);
+                obj.Geometry.SetUserString("SourceLabel", label);
+
+                // Important:
+                // Existing "Cluster" means collapsed/inSteerable SourceCluster.
+                // Steerable arrays must remain separate simulation sources.
+                obj.Geometry.SetUserString("Cluster", null);
+
+                if (string.IsNullOrWhiteSpace(obj.Geometry.GetUserString("ArrayPhaseOctaveDeg")))
+                {
+                    obj.Geometry.SetUserString("ArrayPhaseOctaveDeg", "0;0;0;0;0;0;0;0");
+                }
+
+                if (string.IsNullOrWhiteSpace(obj.Geometry.GetUserString("ArrayDelayOctaveMs")))
+                {
+                    obj.Geometry.SetUserString("ArrayDelayOctaveMs", "0;0;0;0;0;0;0;0");
+                }
+
+                if (string.IsNullOrWhiteSpace(obj.Geometry.GetUserString("ArrayGroupAiming")))
+                {
+                    obj.Geometry.SetUserString(
+                        "ArrayGroupAiming",
+                        obj.Geometry.GetUserString("Aiming"));
+                }
+
+                if (string.IsNullOrWhiteSpace(obj.Geometry.GetUserString("Delay")))
+                {
+                    obj.Geometry.SetUserString("Delay", "0");
+                }
+            }
+
+            private static Rhino.Geometry.Point3d SourcePoint(Rhino.DocObjects.RhinoObject source)
+            {
+                Rhino.Geometry.Point pt = source.Geometry as Rhino.Geometry.Point;
+
+                if (pt != null)
+                {
+                    return pt.Location;
+                }
+
+                Rhino.Geometry.BoundingBox bbox = source.Geometry.GetBoundingBox(true);
+                return bbox.Min;
+            }
+
+            private static string AlphabeticSuffix(int index)
+            {
+                string s = "";
+
+                index++;
+
+                while (index > 0)
+                {
+                    index--;
+                    s = (char)('a' + (index % 26)) + s;
+                    index /= 26;
+                }
+
+                return s;
+            }
+
+            private static string NextArrayLabel(List<Rhino.DocObjects.RhinoObject> selectedSources)
+            {
+                // Conservative default. Later this can inspect existing SourceLabels and pick the next number.
+                return "01";
+            }
+        }
+
+        [System.Runtime.InteropServices.Guid("2C93BFD7-B515-4D33-8B9D-25F4A060921B")]
+        public class PachSteerableArrayControlCommand : Command
+        {
+            public override string EnglishName
+            {
+                get { return "Pach_Steerable_Array_Control"; }
+            }
+
+            protected override Result RunCommand(Rhino.RhinoDoc doc, RunMode mode)
+            {
+                Rhino.DocObjects.ObjRef objRef;
+
+                Result rc = Rhino.Input.RhinoGet.GetOneObject(
+                    "Select one source element in the Steerable array...",
+                    false,
+                    Rhino.DocObjects.ObjectType.Point,
+                    out objRef);
+
+                if (rc != Result.Success || objRef == null) return rc;
+
+                Rhino.DocObjects.RhinoObject seed = objRef.Object();
+
+                if (seed == null || seed.Geometry == null)
+                {
+                    return Result.Failure;
+                }
+
+                string arrayGroup = seed.Geometry.GetUserString("ArrayGroup");
+
+                if (string.IsNullOrWhiteSpace(arrayGroup))
+                {
+                    Rhino.RhinoApp.WriteLine("Selected source is not part of a Steerable array.");
+                    return Result.Cancel;
+                }
+
+                List<Rhino.DocObjects.RhinoObject> elements = new List<Rhino.DocObjects.RhinoObject>();
+
+                foreach (Guid id in SourceConduit.Instance.UUID)
+                {
+                    Rhino.DocObjects.RhinoObject obj =
+                        Rhino.RhinoDoc.ActiveDoc.Objects.FindId(id);
+
+                    if (obj == null || obj.Geometry == null) continue;
+
+                    if (obj.Geometry.GetUserString("ArrayGroup") == arrayGroup)
+                    {
+                        elements.Add(obj);
+                    }
+                }
+
+                elements.Sort((a, b) =>
+                {
+                    int aq, bq;
+                    int.TryParse(a.Geometry.GetUserString("ArrayElementIndex"), out aq);
+                    int.TryParse(b.Geometry.GetUserString("ArrayElementIndex"), out bq);
+                    int ai = Math.Max(aq, 0);
+                    int bi = Math.Max(bq, 0);
+                    return ai.CompareTo(bi);
+                });
+
+                if (elements.Count == 0)
+                {
+                    Rhino.RhinoApp.WriteLine("No source elements were found for this array.");
+                    return Rhino.Commands.Result.Cancel;
+                }
+
+                Pach_ArrayControl form = new Pach_ArrayControl(elements);
+                form.Show();
+
+                return Rhino.Commands.Result.Success;
+            }
+
+            private static int ParseInt(string value, int fallback)
+            {
+                int result;
+                return int.TryParse(value, out result) ? result : fallback;
+            }
+        }
+
         [System.Runtime.InteropServices.Guid("3F0882FB-2DD9-46BA-9A8D-079EFEFF2F54")]
         public class Pach_HumanSource_Object : Command
         {
@@ -788,13 +1066,12 @@ namespace Pachyderm_Acoustic
             }
         }
 
-        public class FIATrackLineSource_Command : Command
+        public class Motorsports_LineSource_Command : Command
         {
             private const double GRAVITY = 9.81;
 
-            public override string EnglishName => "Insert_FIATrackLineSource";
+            public override string EnglishName => "Insert_Motorsports_LineSource";
 
-            // FIA track types (based on your graphic + your needs)
             private enum FiaTrackType
             {
                 Grade1,
@@ -832,8 +1109,6 @@ namespace Pachyderm_Acoustic
 
             private static TrackDefaults Defaults(FiaTrackType type)
             {
-                // These are *starting* defaults. You will tune them as you calibrate sound power / speed.
-                // The important bit is: the command is now capable of supporting any type consistently.
                 switch (type)
                 {
                     case FiaTrackType.Grade1: // F1-ish
@@ -873,6 +1148,10 @@ namespace Pachyderm_Acoustic
             protected override Result RunCommand(RhinoDoc doc, RunMode mode)
             {
                 SourceConduit m_source_conduit = SourceConduit.Instance;
+
+                RhinoApp.WriteLine("Warning: Standard traffic noise models were not developed for racing vehicles or racing speeds. ");
+                RhinoApp.WriteLine("This motorsport source tool is provided as a courtesy only. No accuracy is guaranteed.");
+                RhinoApp.WriteLine("\r\n\r\nFor metadata, I’d store something like:");
 
                 // Select the track curve/polycurve
                 var go = new GetObject();

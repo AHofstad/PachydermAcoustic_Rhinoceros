@@ -583,7 +583,7 @@ namespace Pachyderm_Acoustic
                     {
                         Show_ECC_ABS.Visible = false;
                         Show_ECC_ABS.Checked = false;
-                        Estimates.Visible = false;
+                        Estimates.Visible = false; 
                         Get_Est.Visible = false;
                         Set_Est.Visible = false;
                         Est_Density.Visible = false;

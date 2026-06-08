@@ -1110,9 +1110,10 @@ namespace Pachyderm_Acoustic
             private void Use_RI_Click(object sender, EventArgs e)
             {
                 Result = AbsorptionModelResult.Random_Incidence;
+                Total_Carbon = 0;
                 for (int i = 0; i < Layers.Count; i++)
                 {
-                    Total_Carbon += Layers[i].Embodied_Carbon;
+                    Total_Carbon += Layers[i].Embodied_Carbon * Layers[i].depth;
                 }
                 this.Close();
             }
@@ -1120,9 +1121,10 @@ namespace Pachyderm_Acoustic
             private void Smart_Mat_Click(object sender, EventArgs e)
             {
                 Result = AbsorptionModelResult.Smart_Material;
+                Total_Carbon = 0;
                 for (int i = 0; i < Layers.Count; i++)
                 {
-                    Total_Carbon += Layers[i].Embodied_Carbon;
+                    Total_Carbon += Layers[i].Embodied_Carbon * Layers[i].depth;
                 }
                 this.Close();
             }

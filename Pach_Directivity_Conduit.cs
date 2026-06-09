@@ -43,19 +43,17 @@ namespace Pachyderm_Acoustic
         /// </summary>
         public class SpeakerPatternConduit : DisplayConduit
         {
-            private List<RhinoObject> Array_Objects = null;
+            private List<Guid> Array_Object_IDs = null;
             private bool Use_Array_Mode = false;
             private double Array_Reference_Distance = 10.0;
             private Rhino.Geometry.Mesh Array_Balloon_Mesh = null;
             private bool Show_Array_Balloon = true;
             private double Array_Balloon_Radius = 2.0;
             public int Array_Balloon_Min_Rays = 800;
+
             public enum Display_Mode
             {
                 Boundary_Contours,
-
-                // Kept only so older SourceControl code still compiles.
-                // This conduit no longer draws its own balloon.
                 Sphere,
                 Sphere_And_Boundary_Contours
             }
@@ -94,11 +92,20 @@ namespace Pachyderm_Acoustic
 
             public void SetArrayElements(List<RhinoObject> objects, double referenceDistance)
             {
-                Array_Objects = objects == null
-                    ? null
-                    : new List<RhinoObject>(objects);
+                Array_Object_IDs = new List<Guid>();
 
-                Use_Array_Mode = Array_Objects != null && Array_Objects.Count > 0;
+                if (objects != null)
+                {
+                    for (int i = 0; i < objects.Count; i++)
+                    {
+                        if (objects[i] != null)
+                        {
+                            Array_Object_IDs.Add(objects[i].Id);
+                        }
+                    }
+                }
+
+                Use_Array_Mode = Array_Object_IDs.Count > 0;
                 Array_Reference_Distance = Math.Max(0.1, referenceDistance);
 
                 Source_Object = null;
@@ -106,74 +113,80 @@ namespace Pachyderm_Acoustic
                 Rebuild();
             }
 
-            private struct AimTransform
+            private List<RhinoObject> CurrentArrayObjects()
             {
-                public double Alt;
-                public double Azi;
-                public double Axi;
+                List<RhinoObject> objects = new List<RhinoObject>();
 
-                public static AimTransform FromSource(RhinoObject source)
+                if (Array_Object_IDs == null) return objects;
+                if (RhinoDoc.ActiveDoc == null) return objects;
+
+                for (int i = 0; i < Array_Object_IDs.Count; i++)
                 {
-                    AimTransform aim = new AimTransform();
+                    RhinoObject obj = RhinoDoc.ActiveDoc.Objects.FindId(Array_Object_IDs[i]);
 
-                    if (source == null || source.Geometry == null)
+                    if (obj != null && obj.Geometry != null)
                     {
-                        return aim;
+                        objects.Add(obj);
                     }
-
-                    string aiming = source.Geometry.GetUserString("Aiming");
-                    if (string.IsNullOrEmpty(aiming))
-                    {
-                        return aim;
-                    }
-
-                    string[] A = aiming.Split(';');
-                    if (A.Length < 3)
-                    {
-                        return aim;
-                    }
-
-                    aim.Alt = SafeParse(A[0]) * Math.PI / 180.0;
-                    aim.Azi = SafeParse(A[1]) * Math.PI / 180.0;
-                    aim.Axi = SafeParse(A[2]) * Math.PI / 180.0;
-
-                    return aim;
                 }
 
-                public Hare.Geometry.Vector WorldToLocal(Vector3d world)
+                objects.Sort((a, b) =>
                 {
-                    if (!world.Unitize())
-                    {
-                        return new Hare.Geometry.Vector(0, 1, 0);
-                    }
+                    int ai = 0;
+                    int bi = 0;
 
-                    double x = world.X;
-                    double y = world.Y;
-                    double z = world.Z;
+                    int.TryParse(a.Geometry.GetUserString("ArrayElementIndex"), out ai);
+                    int.TryParse(b.Geometry.GetUserString("ArrayElementIndex"), out bi);
 
-                    // Inverse azimuth rotation in x/y.
-                    double x0 = x * Math.Cos(-Azi) - y * Math.Sin(-Azi);
-                    double y0 = x * Math.Sin(-Azi) + y * Math.Cos(-Azi);
-                    x = x0;
-                    y = y0;
+                    return ai.CompareTo(bi);
+                });
 
-                    // Inverse altitude rotation in y/z.
-                    double y1 = y * Math.Cos(-Alt) - z * Math.Sin(-Alt);
-                    double z1 = y * Math.Sin(-Alt) + z * Math.Cos(-Alt);
-                    y = y1;
-                    z = z1;
+                return objects;
+            }
 
-                    // Inverse axial rotation in x/z.
-                    double x2 = x * Math.Cos(-Axi) - z * Math.Sin(-Axi);
-                    double z2 = x * Math.Sin(-Axi) + z * Math.Cos(-Axi);
-                    x = x2;
-                    z = z2;
+            private static void GetAiming(RhinoObject source, out double alt, out double azi, out double axi)
+            {
+                alt = 0;
+                azi = 0;
+                axi = 0;
 
-                    Hare.Geometry.Vector local = new Hare.Geometry.Vector(x, y, z);
-                    local.Normalize();
+                if (source == null || source.Geometry == null) return;
 
-                    return local;
+                string aiming = source.Geometry.GetUserString("Aiming");
+                if (string.IsNullOrWhiteSpace(aiming)) return;
+
+                string[] A = aiming.Split(';');
+
+                if (A.Length > 0) alt = SafeParse(A[0]);
+                if (A.Length > 1) azi = SafeParse(A[1]);
+                if (A.Length > 2) axi = SafeParse(A[2]);
+            }
+
+            private static Hare.Geometry.Vector WorldToLocal(Vector3d world, double alt, double azi, double axi)
+            {
+                if (!world.Unitize())
+                {
+                    return new Hare.Geometry.Vector(0, 1, 0);
                 }
+
+                Hare.Geometry.Vector local = new Hare.Geometry.Vector(world.X, world.Y, world.Z);
+
+                // Inverse of the normal Pachyderm aiming rotation.
+                local = Utilities.PachTools.Rotate_Vector(local, -azi, 0, true);
+                local = Utilities.PachTools.Rotate_Vector(local, 0, -alt, true);
+
+                if (Math.Abs(axi) > 1E-9)
+                {
+                    double a = -axi * Math.PI / 180.0;
+                    double x = local.dx;
+                    double z = local.dz;
+
+                    local.dx = x * Math.Cos(a) - z * Math.Sin(a);
+                    local.dz = x * Math.Sin(a) + z * Math.Cos(a);
+                }
+
+                local.Normalize();
+                return local;
             }
 
             private sealed class DirectivityLookup
@@ -457,21 +470,30 @@ namespace Pachyderm_Acoustic
             public bool Use_Cached_Geometry = true;
             public Display_Mode Mode = Display_Mode.Boundary_Contours;
 
+            private static SpeakerPatternConduit instance = null;
+
             public static SpeakerPatternConduit Instance
             {
-                get;
-                private set;
+                get
+                {
+                    if (instance == null) instance = new SpeakerPatternConduit();
+                    return instance;
+                }
             }
 
-            public SpeakerPatternConduit()
+            private SpeakerPatternConduit()
             {
-                Instance = this;
                 EnsureContourStorage();
             }
 
             public void SetSource(RhinoObject Obj)
             {
+                Array_Object_IDs = null;
+                Use_Array_Mode = false;
+                Array_Balloon_Mesh = null;
+
                 Source_Object = Obj;
+
                 Rebuild();
             }
 
@@ -485,11 +507,17 @@ namespace Pachyderm_Acoustic
             public void Clear()
             {
                 Source_Object = null;
-                Array_Objects = null;
+                Array_Object_IDs = null;
                 Use_Array_Mode = false;
                 Array_Balloon_Mesh = null;
 
-                if (Boundary_Contour_Lines != null) for (int i = 0; i < Boundary_Contour_Lines.Length; i++) Boundary_Contour_Lines[i]?.Clear();
+                if (Boundary_Contour_Lines != null)
+                {
+                    for (int i = 0; i < Boundary_Contour_Lines.Length; i++)
+                    {
+                        Boundary_Contour_Lines[i]?.Clear();
+                    }
+                }
 
                 Boundary_Contour_Labels.Clear();
                 Enabled = false;
@@ -513,9 +541,9 @@ namespace Pachyderm_Acoustic
 
                 if (Use_Array_Mode)
                 {
-                    if (Array_Objects == null || Array_Objects.Count == 0) return;
-
-                    BuildBoundaryContoursArray(Array_Objects, Octave);
+                    List<RhinoObject> array_objects = CurrentArrayObjects();
+                    if (array_objects == null || array_objects.Count == 0) return;
+                    BuildBoundaryContoursArray(array_objects, Octave);
                 }
                 else
                 {
@@ -526,9 +554,11 @@ namespace Pachyderm_Acoustic
                     if (lookup == null) return;
 
                     Point3d source_pt = SourcePoint(Source_Object);
-                    AimTransform aim = AimTransform.FromSource(Source_Object);
+                    
+                    double alt, azi, axi;
+                    GetAiming(Source_Object, out alt, out azi, out axi);
 
-                    BuildBoundaryContours(source_pt, aim, lookup);
+                    BuildBoundaryContours(source_pt, alt, azi, axi, lookup);
                 }
 
                 Enabled = true;
@@ -561,10 +591,12 @@ namespace Pachyderm_Acoustic
                 }
 
                 double omega = Utilities.Numerics.angularFrequency_Octave[oct];
+                double k = omega / 343.0;
 
                 List<Point3d> elementOrigins = new List<Point3d>();
-                List<AimTransform> elementAims = new List<AimTransform>();
-                List<DirectivityLookup> elementLookups = new List<DirectivityLookup>();
+                List<double> elementAlt = new List<double>();
+                List<double> elementAzi = new List<double>();
+                List<double> elementAxi = new List<double>(); List<DirectivityLookup> elementLookups = new List<DirectivityLookup>();
                 List<double> elementGainsDb = new List<double>();
                 List<double> elementDelaysMs = new List<double>();
 
@@ -578,7 +610,8 @@ namespace Pachyderm_Acoustic
                     if (lookup == null) continue;
 
                     Point3d origin = SourcePoint(src);
-                    AimTransform aim = AimTransform.FromSource(src);
+                    double alt, azi, axi;
+                    GetAiming(src, out alt, out azi, out axi);
 
                     double gainDb = 0.0;
                     string swl = src.Geometry.GetUserString("SWL");
@@ -637,7 +670,9 @@ namespace Pachyderm_Acoustic
                     }
 
                     elementOrigins.Add(origin);
-                    elementAims.Add(aim);
+                    elementAlt.Add(alt);
+                    elementAzi.Add(azi);
+                    elementAxi.Add(axi);
                     elementLookups.Add(lookup);
                     elementGainsDb.Add(gainDb);
                     elementDelaysMs.Add(delayMs);
@@ -677,7 +712,6 @@ namespace Pachyderm_Acoustic
                 }
 
                 double c = 343.0;
-                double k = 2.0 * Math.PI * frequency / c;
 
                 Array_Balloon_Mesh = null;
 
@@ -705,7 +739,7 @@ namespace Pachyderm_Acoustic
                             if (r <= Rhino.RhinoMath.ZeroTolerance) continue;
                             worldDir.Unitize();
 
-                            Hare.Geometry.Vector local = elementAims[e].WorldToLocal(worldDir);
+                            Hare.Geometry.Vector local = WorldToLocal(worldDir, elementAlt[e], elementAzi[e], elementAxi[e]);
 
                             double directivityDb = elementLookups[e].Evaluate(local) - elementLookups[e].Maximum;
                             double gain = Math.Pow(10.0, (elementGainsDb[e] - maxGainDb + directivityDb) / 20.0);
@@ -780,15 +814,14 @@ namespace Pachyderm_Acoustic
                         if (r <= Rhino.RhinoMath.ZeroTolerance) continue;
                         worldDir.Unitize();
 
-                        Hare.Geometry.Vector local = elementAims[e].WorldToLocal(worldDir);
-                        double directivityDb = elementLookups[e].Evaluate(local) - elementLookups[e].Maximum;
+                        Hare.Geometry.Vector local = WorldToLocal(worldDir, elementAlt[e], elementAzi[e], elementAxi[e]); double directivityDb = elementLookups[e].Evaluate(local) - elementLookups[e].Maximum;
 
                         double gain = Math.Pow(10.0, (elementGainsDb[e] - maxGainDb + directivityDb) / 20.0);
                         double tau = elementDelaysMs[e] / 1000.0;
 
                         // Use element-to-target distance for phase.
                         // Do not apply 1/r amplitude loss here; this is a relative directivity display.
-                        double phase = -k * r - 2.0 * Math.PI * frequency * tau;
+                        double phase = -k * r - omega * tau;
                         sum += System.Numerics.Complex.FromPolarCoordinates(gain, phase);
                     }
 
@@ -891,12 +924,7 @@ namespace Pachyderm_Acoustic
                 {
                     if (Boundary_Contour_Lines[i] == null) continue;
                     if (Boundary_Contour_Lines[i].Count == 0) continue;
-
-                    e.Display.DrawLines(
-                        Boundary_Contour_Lines[i],
-                        Boundary_Contour_Colors[i],
-                        Contour_Line_Thickness
-                    );
+                    e.Display.DrawLines(Boundary_Contour_Lines[i], Boundary_Contour_Colors[i], Contour_Line_Thickness);
                 }
 
                 if (Show_Contour_Labels && Boundary_Contour_Labels.Count > 0)
@@ -909,7 +937,7 @@ namespace Pachyderm_Acoustic
                 }
             }
 
-            private void BuildBoundaryContours(Point3d source, AimTransform aim, DirectivityLookup lookup)
+            private void BuildBoundaryContours(Point3d source, double alt, double azi, double axi, DirectivityLookup lookup)
             {
                 Rhino.Geometry.Mesh scene = ProjectionSceneMesh();
 
@@ -944,7 +972,7 @@ namespace Pachyderm_Acoustic
                         return;
                     }
 
-                    Hare.Geometry.Vector local = aim.WorldToLocal(dir);
+                    Hare.Geometry.Vector local = WorldToLocal(dir, alt, azi, axi);
                     double raw = lookup.Evaluate(local);
 
                     if (double.IsNaN(raw) || double.IsInfinity(raw))

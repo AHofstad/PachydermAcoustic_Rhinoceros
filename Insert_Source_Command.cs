@@ -303,10 +303,7 @@ namespace Pachyderm_Acoustic
                     Rhino.DocObjects.ObjectType.Point,
                     out objRefs);
 
-                if (rc != Result.Success || objRefs == null || objRefs.Length == 0)
-                {
-                    return rc;
-                }
+                if (rc != Result.Success || objRefs == null || objRefs.Length == 0) return rc;
 
                 List<Rhino.DocObjects.RhinoObject> sources =
                     new List<Rhino.DocObjects.RhinoObject>();
@@ -330,18 +327,10 @@ namespace Pachyderm_Acoustic
                 string groupLabel = NextArrayLabel(sources);
                 rc = Rhino.Input.RhinoGet.GetString("Array label", true, ref groupLabel);
 
-                if (rc != Result.Success)
-                {
-                    return rc;
-                }
+                if (rc != Result.Success) return rc;
 
                 bool sortByElevation = true;
-                Rhino.Input.RhinoGet.GetBool(
-                    "Sort elements by elevation before labeling?",
-                    true,
-                    "No",
-                    "Yes",
-                    ref sortByElevation);
+                Rhino.Input.RhinoGet.GetBool("Sort elements by elevation before labeling?", true, "No", "Yes", ref sortByElevation);
 
                 if (sortByElevation)
                 {
@@ -354,27 +343,15 @@ namespace Pachyderm_Acoustic
                 }
 
                 Guid arrayGroup = Guid.NewGuid();
-
                 List<Guid> groupIds = new List<Guid>();
 
                 for (int i = 0; i < sources.Count; i++)
                 {
                     Rhino.DocObjects.RhinoObject obj = sources[i];
-
-                    AssignSteerableArrayMetadata(
-                        obj,
-                        arrayGroup,
-                        groupLabel,
-                        i);
-
+                    AssignSteerableArrayMetadata(obj, arrayGroup, groupLabel, i);
                     groupIds.Add(obj.Id);
-
-                    SourceConduit.Instance.SetSource(obj);
-
                     if (obj == null) continue;
-
                     bool found = false;
-
                     foreach (System.Guid id in SourceConduit.Instance.UUID)
                     {
                         if (id == obj.Id)
@@ -384,31 +361,19 @@ namespace Pachyderm_Acoustic
                         }
                     }
 
-                    if (!found)
-                    {
-                        SourceConduit.Instance.SetSource(obj);
-                    }
+                    if (!found) SourceConduit.Instance.SetSource(obj);
                     Rhino.RhinoDoc.ActiveDoc.Views.Redraw();
                 }
 
-                // Rhino group for convenient selection only.
-                doc.Groups.Add(groupIds);
-
+                // Rhino group for convenient selection.
+                string rhinoGroupName = "Pachyderm Steerable Array " + groupLabel;
+                int groupIndex = doc.Groups.FindName(rhinoGroupName) == null ? doc.Groups.Add(rhinoGroupName, groupIds) : doc.Groups.Add(groupIds);
                 doc.Views.Redraw();
-
-                Rhino.RhinoApp.WriteLine(
-                    "Created Steerable speaker array {0} with {1} elements.",
-                    groupLabel,
-                    sources.Count);
-
+                Rhino.RhinoApp.WriteLine( "Created Steerable speaker array {0} with {1} elements.", groupLabel, sources.Count);
                 return Result.Success;
             }
 
-            private static void AssignSteerableArrayMetadata(
-                Rhino.DocObjects.RhinoObject obj,
-                Guid arrayGroup,
-                string groupLabel,
-                int elementIndex)
+            private static void AssignSteerableArrayMetadata(Rhino.DocObjects.RhinoObject obj, Guid arrayGroup, string groupLabel, int elementIndex)
             {
                 string suffix = AlphabeticSuffix(elementIndex);
                 string label = groupLabel + suffix;
@@ -433,13 +398,6 @@ namespace Pachyderm_Acoustic
                 if (string.IsNullOrWhiteSpace(obj.Geometry.GetUserString("ArrayDelayOctaveMs")))
                 {
                     obj.Geometry.SetUserString("ArrayDelayOctaveMs", "0;0;0;0;0;0;0;0");
-                }
-
-                if (string.IsNullOrWhiteSpace(obj.Geometry.GetUserString("ArrayGroupAiming")))
-                {
-                    obj.Geometry.SetUserString(
-                        "ArrayGroupAiming",
-                        obj.Geometry.GetUserString("Aiming"));
                 }
 
                 if (string.IsNullOrWhiteSpace(obj.Geometry.GetUserString("Delay")))
@@ -494,72 +452,151 @@ namespace Pachyderm_Acoustic
 
             protected override Result RunCommand(Rhino.RhinoDoc doc, RunMode mode)
             {
-                Rhino.DocObjects.ObjRef objRef;
+                Rhino.Input.Custom.GetObject go = new Rhino.Input.Custom.GetObject();
+                go.SetCommandPrompt("Select steerable speaker array group...");
+                go.GeometryFilter = Rhino.DocObjects.ObjectType.Point;
+                go.GroupSelect = true;
+                go.SubObjectSelect = false;
+                go.EnablePreSelect(true, true);
+                go.DeselectAllBeforePostSelect = true;
+                go.EnableClearObjectsOnEntry(false);
+                go.EnableUnselectObjectsOnExit(false);
 
-                Result rc = Rhino.Input.RhinoGet.GetOneObject(
-                    "Select one source element in the Steerable array...",
-                    false,
-                    Rhino.DocObjects.ObjectType.Point,
-                    out objRef);
+                Rhino.Input.GetResult gr = go.GetMultiple(1, 0);
 
-                if (rc != Result.Success || objRef == null) return rc;
-
-                Rhino.DocObjects.RhinoObject seed = objRef.Object();
-
-                if (seed == null || seed.Geometry == null)
+                if (gr != Rhino.Input.GetResult.Object)
                 {
-                    return Result.Failure;
-                }
-
-                string arrayGroup = seed.Geometry.GetUserString("ArrayGroup");
-
-                if (string.IsNullOrWhiteSpace(arrayGroup))
-                {
-                    Rhino.RhinoApp.WriteLine("Selected source is not part of a Steerable array.");
                     return Result.Cancel;
                 }
 
-                List<Rhino.DocObjects.RhinoObject> elements = new List<Rhino.DocObjects.RhinoObject>();
+                List<Rhino.DocObjects.RhinoObject> picked = new List<Rhino.DocObjects.RhinoObject>();
 
-                foreach (Guid id in SourceConduit.Instance.UUID)
+                for (int i = 0; i < go.ObjectCount; i++)
                 {
-                    Rhino.DocObjects.RhinoObject obj =
-                        Rhino.RhinoDoc.ActiveDoc.Objects.FindId(id);
+                    Rhino.DocObjects.RhinoObject obj = go.Object(i).Object();
 
                     if (obj == null || obj.Geometry == null) continue;
+                    if (obj.Attributes.Name != "Acoustical Source") continue;
 
-                    if (obj.Geometry.GetUserString("ArrayGroup") == arrayGroup)
+                    picked.Add(obj);
+                }
+
+                if (picked.Count == 0)
+                {
+                    Rhino.RhinoApp.WriteLine("No acoustical source objects selected.");
+                    return Result.Cancel;
+                }
+
+                string arrayGroup = "";
+
+                for (int i = 0; i < picked.Count; i++)
+                {
+                    string modeString = picked[i].Geometry.GetUserString("ArrayMode");
+                    string groupString = picked[i].Geometry.GetUserString("ArrayGroup");
+
+                    if (modeString == "Steerable" && !string.IsNullOrWhiteSpace(groupString))
                     {
-                        elements.Add(obj);
+                        arrayGroup = groupString;
+                        break;
                     }
+                }
+
+                if (string.IsNullOrWhiteSpace(arrayGroup))
+                {
+                    Rhino.RhinoApp.WriteLine("Selected objects are not part of a steerable array.");
+                    return Result.Cancel;
+                }
+
+                List<Rhino.DocObjects.RhinoObject> elements = CollectSteerableArrayElementsFromSelection(doc, picked, arrayGroup);
+
+                if (elements.Count == 0)
+                {
+                    Rhino.RhinoApp.WriteLine("No source elements were found for this steerable array.");
+                    return Result.Cancel;
                 }
 
                 elements.Sort((a, b) =>
                 {
-                    int aq, bq;
-                    int.TryParse(a.Geometry.GetUserString("ArrayElementIndex"), out aq);
-                    int.TryParse(b.Geometry.GetUserString("ArrayElementIndex"), out bq);
-                    int ai = Math.Max(aq, 0);
-                    int bi = Math.Max(bq, 0);
+                    int ai = 0;
+                    int bi = 0;
+
+                    int.TryParse(a.Geometry.GetUserString("ArrayElementIndex"), out ai);
+                    int.TryParse(b.Geometry.GetUserString("ArrayElementIndex"), out bi);
+
                     return ai.CompareTo(bi);
                 });
 
-                if (elements.Count == 0)
+                doc.Objects.UnselectAll();
+
+                for (int i = 0; i < elements.Count; i++)
                 {
-                    Rhino.RhinoApp.WriteLine("No source elements were found for this array.");
-                    return Rhino.Commands.Result.Cancel;
+                    elements[i].Select(true);
+                    bool found = false;
+
+                    foreach (System.Guid id in SourceConduit.Instance.UUID)
+                    {
+                        if (id == elements[i].Id)
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+
+                    if (!found) SourceConduit.Instance.SetSource(elements[i]);
                 }
+
+                doc.Views.Redraw();
 
                 Pach_ArrayControl form = new Pach_ArrayControl(elements);
                 form.Show();
 
-                return Rhino.Commands.Result.Success;
+                return Result.Success;
             }
 
-            private static int ParseInt(string value, int fallback)
+            private static List<Rhino.DocObjects.RhinoObject> CollectSteerableArrayElementsFromSelection(Rhino.RhinoDoc doc, List<Rhino.DocObjects.RhinoObject> picked, string arrayGroup)
             {
-                int result;
-                return int.TryParse(value, out result) ? result : fallback;
+                List<Rhino.DocObjects.RhinoObject> elements = new List<Rhino.DocObjects.RhinoObject>();
+                HashSet<System.Guid> ids = new HashSet<System.Guid>();
+
+                for (int i = 0; i < picked.Count; i++)
+                {
+                    Rhino.DocObjects.RhinoObject obj = picked[i];
+
+                    if (obj == null || obj.Geometry == null) continue;
+                    if (obj.Attributes.Name != "Acoustical Source") continue;
+                    if (obj.Geometry.GetUserString("ArrayMode") != "Steerable") continue;
+                    if (obj.Geometry.GetUserString("ArrayGroup") != arrayGroup) continue;
+
+                    if (ids.Add(obj.Id)) elements.Add(obj);
+                }
+
+                // Then expand from the Rhino group memberships of the picked objects.
+                for (int i = 0; i < picked.Count; i++)
+                {
+                    Rhino.DocObjects.RhinoObject seed = picked[i];
+                    if (seed == null) continue;
+                    int[] groupList = seed.Attributes.GetGroupList();
+                    if (groupList == null) continue;
+
+                    for (int g = 0; g < groupList.Length; g++)
+                    {
+                        RhinoObject[] members = doc.Groups.GroupMembers(groupList[g]);
+                        if (members == null) continue;
+
+                        for (int m = 0; m < members.Length; m++)
+                        {
+                            Rhino.DocObjects.RhinoObject obj = doc.Objects.FindId(members[m].Id);
+
+                            if (obj == null || obj.Geometry == null) continue;
+                            if (obj.Attributes.Name != "Acoustical Source") continue;
+                            if (obj.Geometry.GetUserString("ArrayMode") != "Steerable") continue;
+                            if (obj.Geometry.GetUserString("ArrayGroup") != arrayGroup) continue;
+
+                            if (ids.Add(obj.Id)) elements.Add(obj);
+                        }
+                    }
+                }
+                return elements;
             }
         }
 
@@ -1584,6 +1621,7 @@ namespace Pachyderm_Acoustic
             private List<System.Guid> m_id_list = new List<System.Guid>();
             public List<Balloon> m_Balloons = new List<Balloon>();
             private List<RhinoCabinetDisplay> m_Cabinets = new List<RhinoCabinetDisplay>();
+            private string m_last_selected_array_preview = ""; 
             public Dodec d = new Dodec(0.18);
             DisplayBitmap SS;
             DisplayBitmap SU;
@@ -1667,6 +1705,14 @@ namespace Pachyderm_Acoustic
 
                 try
                 {
+                    if (e.NewRhinoObject != null && e.NewRhinoObject.Geometry != null && e.NewRhinoObject.Geometry.GetUserString("ArrayMode") == "Steerable" && !string.IsNullOrWhiteSpace(e.NewRhinoObject.Geometry.GetUserString("ArrayGroup")))
+                    {
+                        if (SpeakerPatternConduit.Instance != null && SpeakerPatternConduit.Instance.Enabled)
+                        {
+                            SpeakerPatternConduit.Instance.Rebuild();
+                        }
+                    }
+
                     string typ = "";
                     typ = e.OldRhinoObject.Geometry.GetUserString("SourceType");
                     if (typ != "2" && typ != "3") return;
@@ -1826,8 +1872,75 @@ namespace Pachyderm_Acoustic
                 }
             }
 
+            private Dictionary<string, List<RhinoObject>> SelectedSteerableArrays()
+            {
+                Dictionary<string, List<RhinoObject>> arrays = new Dictionary<string, List<RhinoObject>>();
+
+                for (int i = 0; i < m_id_list.Count; i++)
+                {
+                    RhinoObject obj = RhinoDoc.ActiveDoc.Objects.FindId(m_id_list[i]);
+                    if (obj == null || obj.Geometry == null) continue;
+                    if (obj.IsSelected(false) == 0) continue;
+
+                    string mode = obj.Geometry.GetUserString("ArrayMode");
+                    string group = obj.Geometry.GetUserString("ArrayGroup");
+
+                    if (mode != "Steerable") continue;
+                    if (string.IsNullOrWhiteSpace(group)) continue;
+
+                    if (!arrays.ContainsKey(group))
+                    {
+                        arrays[group] = new List<RhinoObject>();
+                    }
+
+                    arrays[group].Add(obj);
+                }
+
+                foreach (KeyValuePair<string, List<RhinoObject>> kvp in arrays)
+                {
+                    kvp.Value.Sort((a, b) =>
+                    {
+                        int ai = 0;
+                        int bi = 0;
+
+                        int.TryParse(a.Geometry.GetUserString("ArrayElementIndex"), out ai);
+                        int.TryParse(b.Geometry.GetUserString("ArrayElementIndex"), out bi);
+
+                        return ai.CompareTo(bi);
+                    });
+                }
+
+                return arrays;
+            }
+
             protected override void DrawForeground(DrawEventArgs e)
             {
+                Dictionary<string, List<RhinoObject>> selected_arrays = SelectedSteerableArrays();
+                HashSet<string> selected_array_groups = new HashSet<string>(selected_arrays.Keys);
+
+                if (selected_arrays.Count > 0)
+                {
+                    KeyValuePair<string, List<RhinoObject>> first = selected_arrays.First();
+
+                    if (SpeakerPatternConduit.Instance != null)
+                    {
+                        SpeakerPatternConduit.Instance.Mode = SpeakerPatternConduit.Display_Mode.Boundary_Contours;
+                        SpeakerPatternConduit.Instance.SetArrayElements(first.Value, 10.0);
+                        SpeakerPatternConduit.Instance.Enabled = true;
+                    }
+
+                    m_last_selected_array_preview = first.Key;
+                }
+                else if (!string.IsNullOrWhiteSpace(m_last_selected_array_preview))
+                {
+                    if (SpeakerPatternConduit.Instance != null)
+                    {
+                        SpeakerPatternConduit.Instance.Clear();
+                    }
+
+                    m_last_selected_array_preview = "";
+                }
+
                 int index = 0;
                 foreach (Guid G in m_id_list)
                 {
@@ -1849,6 +1962,12 @@ namespace Pachyderm_Acoustic
                             Rhino.Geometry.Point3d pt = rhobj.Geometry.GetBoundingBox(true).Min;
                             // this is a point object so the bounding box will be wee sized 
                             Rhino.Geometry.Point2d screen_pt = e.Display.Viewport.WorldToClient(pt);
+
+                            string array_mode = rhobj.Geometry.GetUserString("ArrayMode");
+                            string array_group = rhobj.Geometry.GetUserString("ArrayGroup");
+
+                            bool suppress_element_balloon = array_mode == "Steerable" && !string.IsNullOrWhiteSpace(array_group) && selected_array_groups.Contains(array_group);
+                            
                             if ((mode == "2" || mode == "3") && m_Balloons[index] != null)
                             {
                                 if ((rhobj.IsSelected(false) != 0))
@@ -1856,7 +1975,7 @@ namespace Pachyderm_Acoustic
                                     //Display the balloon for 1khz.
                                     //e.Display.DrawSprite(LS, pt, 0.25f, true);// screen_pt, 32.0f);
                                     DrawCabinetOrSprite(e, rhobj, index, LS, pt, 0.25f);
-                                    e.Display.DrawMeshWires(Utilities.RCPachTools.HaretoRhinoMesh(this.m_Balloons[index].m_DisplayMesh, false), Color.Blue);
+                                    if (!suppress_element_balloon) e.Display.DrawMeshWires(Utilities.RCPachTools.HaretoRhinoMesh(this.m_Balloons[index].m_DisplayMesh, false), Color.Blue);
                                     e.Display.Draw2dText(index.ToString(), Color.Yellow, new Rhino.Geometry.Point2d((int)screen_pt.X, (int)screen_pt.Y + 40), false, 18, "Arial");
                                     double Theta = (m_Balloons[index].CurrentAlt + 270) * System.Math.PI / 180;
                                     double Phi = (m_Balloons[index].CurrentAzi - 90) * System.Math.PI / 180;

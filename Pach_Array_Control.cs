@@ -17,10 +17,6 @@ namespace Pachyderm_Acoustic
             private DynamicLayout ElementLayout;
             private Scrollable ElementScroll;
 
-            private NumericStepper GroupAlt;
-            private NumericStepper GroupAzi;
-            private NumericStepper GroupAxial;
-            private double[] CurrentGroupAim = new double[3];
             private bool LoadingGroup = false;
 
             private CheckBox ShowPattern;
@@ -37,7 +33,7 @@ namespace Pachyderm_Acoustic
                 Width = 1050;
                 Height = 750;
 
-                PatternConduit = new SpeakerPatternConduit();
+                PatternConduit = SpeakerPatternConduit.Instance;
                 PatternConduit.Mode = SpeakerPatternConduit.Display_Mode.Boundary_Contours;
                 PatternConduit.Contour_Levels = new double[] { -1, -2, -3, -4, -5, -6, -12, -18 };
                 PatternConduit.Contour_Mesh_Max_Edge = 2.0;
@@ -92,32 +88,6 @@ namespace Pachyderm_Acoustic
                 box.Content = l;
                 layout.AddRow(box);
 
-
-
-                //Add Group Aiming Controls
-                GroupBox Gbox = new GroupBox { Text = "Group Aiming" };
-
-                DynamicLayout Gl = new DynamicLayout();
-                Gl.Padding = 8;
-                Gl.DefaultSpacing = new Size(4, 6);
-
-                GroupAlt = NewAngleStepper(-90, 90);
-                GroupAzi = NewAngleStepper(-360, 360);
-                GroupAxial = NewAngleStepper(-360, 360);
-
-                GroupAlt.ValueChanged += GroupAiming_ValueChanged;
-                GroupAzi.ValueChanged += GroupAiming_ValueChanged;
-                GroupAxial.ValueChanged += GroupAiming_ValueChanged;
-
-                Gl.AddRow(
-                    new Label { Text = "Altitude" }, GroupAlt,
-                    new Label { Text = "Azimuth" }, GroupAzi,
-                    new Label { Text = "Axial" }, GroupAxial);
-
-                Gbox.Content = Gl;
-                layout.AddRow(Gbox);
-
-
                 AddElementControls(layout);
 
                 Button close = new Button { Text = "Close" };
@@ -139,33 +109,25 @@ namespace Pachyderm_Acoustic
                 //Load Group Aiming
                 LoadingGroup = true;
 
-                double[] aim = null;
+                //double[] aim = null;
 
-                if (Elements != null && Elements.Count > 0)
-                {
-                    string groupAim = Elements[0].Geometry.GetUserString("ArrayGroupAiming");
+                //if (Elements != null && Elements.Count > 0)
+                //{
+                //    string groupAim = Elements[0].Geometry.GetUserString("ArrayGroupAiming");
 
-                    if (!string.IsNullOrWhiteSpace(groupAim))
-                    {
-                        aim = DecodeTriple(groupAim);
-                    }
-                    else
-                    {
-                        aim = DecodeTriple(Elements[0].Geometry.GetUserString("Aiming"));
-                    }
-                }
+                //    if (!string.IsNullOrWhiteSpace(groupAim))
+                //    {
+                //        aim = DecodeTriple(groupAim);
+                //    }
+                //    else
+                //    {
+                //        aim = DecodeTriple(Elements[0].Geometry.GetUserString("Aiming"));
+                //    }
+                //}
 
-                if (aim == null) aim = new double[3];
-
-                CurrentGroupAim = aim;
-
-                GroupAlt.Value = aim[0];
-                GroupAzi.Value = aim[1];
-                GroupAxial.Value = aim[2];
+                //if (aim == null) aim = new double[3];
 
                 LoadingGroup = false;
-
-
                 UpdatePatternConduit();
             }
 
@@ -188,54 +150,6 @@ namespace Pachyderm_Acoustic
                     Increment = 1,
                     Width = 90
                 };
-            }
-
-            private void GroupAiming_ValueChanged(object sender, EventArgs e)
-            {
-                if (LoadingGroup) return;
-                if (Elements == null || Elements.Count == 0) return;
-
-                double[] newAim = new double[]
-                {
-                    GroupAlt.Value,
-                    GroupAzi.Value,
-                    GroupAxial.Value
-                };
-
-                double[] delta = new double[]
-                {
-                    newAim[0] - CurrentGroupAim[0],
-                    newAim[1] - CurrentGroupAim[1],
-                    newAim[2] - CurrentGroupAim[2]
-                };
-
-                for (int i = 0; i < Elements.Count; i++)
-                {
-                    RhinoObject obj = Elements[i];
-                    if (obj == null || obj.Geometry == null) continue;
-
-                    double[] elementAim = DecodeTriple(obj.Geometry.GetUserString("Aiming"));
-
-                    elementAim[0] = Math.Min(Math.Max (elementAim[0] + delta[0], -90), 90);
-
-                    double ang = elementAim[1] + delta[1];
-                    elementAim[1] = (ang < 0 ? ang + 360 : ang) >= 360 ? ang - 360 : ang;
-                    ang = elementAim[2] + delta[2];
-                    elementAim[2] = (ang < 0 ? ang + 360 : ang) >= 360 ? ang - 360 : ang;
-
-                    obj.Geometry.SetUserString("Aiming", EncodeTriple(elementAim));
-                    obj.Geometry.SetUserString("ArrayGroupAiming", EncodeTriple(newAim));
-
-                    EnsureSourceInConduit(obj);
-                    Rhino.RhinoDoc.ActiveDoc.Views.Redraw();
-                }
-
-                CurrentGroupAim = newAim;
-
-                RebuildElementEditors();
-                UpdatePatternConduit();
-
-                Rhino.RhinoDoc.ActiveDoc.Views.Redraw();
             }
 
             private static void EnsureSourceInConduit(Rhino.DocObjects.RhinoObject obj)
@@ -443,7 +357,7 @@ namespace Pachyderm_Acoustic
                 Azi.Value = aim[1];
                 Axial.Value = aim[2];
 
-                double[] phase = PachTools.DecodeEight(Obj.Geometry.GetUserString("ArrayDelayOctaveMs"));
+                double[] phase = PachTools.DecodeEight(Obj.Geometry.GetUserString("ArrayPhaseOctaveDeg"));
 
                 for (int i = 0; i < 8; i++)
                 {

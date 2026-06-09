@@ -89,7 +89,7 @@ namespace Pachyderm_Acoustic
             public Pach_SourceControl()
             {
                 SC = SourceConduit.Instance;
-                SpeakerPattern = new SpeakerPatternConduit();
+                SpeakerPattern = SpeakerPatternConduit.Instance;
                 SpeakerPattern.Mode = SpeakerPatternConduit.Display_Mode.Boundary_Contours;
                 SpeakerPattern.Contour_Levels = new double[] { -1, -2, -3, -4, -5, -6, -12, -18 };
                 SpeakerPattern.Octave = 4;
@@ -1000,6 +1000,14 @@ namespace Pachyderm_Acoustic
 
                 if (Objects[0].Attributes.Name != "Acoustical Source" &&
                     Objects[0].Name != "Acoustical Source")
+                {
+                    return false;
+                }
+
+                string array_mode = Objects[0].Geometry.GetUserString("ArrayMode");
+                string array_group = Objects[0].Geometry.GetUserString("ArrayGroup");
+
+                if (array_mode == "Steerable" && !string.IsNullOrWhiteSpace(array_group))
                 {
                     return false;
                 }

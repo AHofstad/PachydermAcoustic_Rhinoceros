@@ -2,6 +2,7 @@
 using Eto.Forms;
 using Pachyderm_Acoustic.Utilities;
 using Rhino.DocObjects;
+using Rhino.Geometry;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -30,8 +31,8 @@ namespace Pachyderm_Acoustic
                 Elements = elements;
 
                 Title = "Pachyderm Speaker Array Control";
-                Width = 1050;
-                Height = 750;
+                Width = 900;
+                Height = 500;
 
                 PatternConduit = SpeakerPatternConduit.Instance;
                 PatternConduit.Mode = SpeakerPatternConduit.Display_Mode.Boundary_Contours;
@@ -78,12 +79,21 @@ namespace Pachyderm_Acoustic
                 PatternReferenceDistance.Value = 10;
                 PatternReferenceDistance.ValueChanged += (s, e) => UpdatePatternConduit();
 
+                Button aimAtPoints = new Button();
+                aimAtPoints.Text = "Aim at Points";
+                aimAtPoints.Click += (s, e) => AimPhaseAtPoints(false);
+
+                Button optimizeAtPoints = new Button();
+                optimizeAtPoints.Text = "Optimize";
+                optimizeAtPoints.Click += (s, e) => AimPhaseAtPoints(true);
+
                 l.AddRow(
                     ShowPattern,
                     new Label { Text = "Octave" },
                     PatternOctave,
                     new Label { Text = "Reference distance" },
-                    PatternReferenceDistance);
+                    PatternReferenceDistance,
+                    aimAtPoints, optimizeAtPoints);
 
                 box.Content = l;
                 layout.AddRow(box);
@@ -131,6 +141,30 @@ namespace Pachyderm_Acoustic
                 UpdatePatternConduit();
             }
 
+            private List<Rhino.Geometry.Point3d> GetTargetPoints()
+            {
+                List<Rhino.Geometry.Point3d> targets = new List<Rhino.Geometry.Point3d>();
+
+                while (true)
+                {
+                    Rhino.Geometry.Point3d pt;
+                    Rhino.Commands.Result rc = Rhino.Input.RhinoGet.GetPoint(
+                        targets.Count == 0 ? "Select target point" : "Select another target point. Press Enter when done.",
+                        true,
+                        out pt);
+
+                    if (rc == Rhino.Commands.Result.Success)
+                    {
+                        targets.Add(pt);
+                        continue;
+                    }
+
+                    break;
+                }
+
+                return targets;
+            }
+
             private void AddElementControls(DynamicLayout layout)
             {
                 ElementScroll = new Scrollable();
@@ -140,16 +174,280 @@ namespace Pachyderm_Acoustic
                 layout.AddRow(ElementScroll);
             }
 
-            private NumericStepper NewAngleStepper(double min, double max)
+            private void AimPhaseAtPoints(bool fineTune)
             {
-                return new NumericStepper
+                if (Elements == null || Elements.Count == 0) return;
+
+                List<Rhino.Geometry.Point3d> targets = GetTargetPoints();
+                if (targets.Count == 0) return;
+
+                double c = 343.0;
+                double[] seed_ms = new double[Elements.Count];
+
+                for (int t = 0; t < targets.Count; t++)
                 {
-                    DecimalPlaces = 3,
-                    MinValue = min,
-                    MaxValue = max,
-                    Increment = 1,
-                    Width = 90
-                };
+                    double[] r = new double[Elements.Count];
+                    double r_ref = double.NegativeInfinity;
+
+                    for (int i = 0; i < Elements.Count; i++)
+                    {
+                        Rhino.Geometry.Point3d src = Elements[i].Geometry.GetBoundingBox(true).Min;
+                        r[i] = src.DistanceTo(targets[t]);
+                        if (r[i] > r_ref) r_ref = r[i];
+                    }
+
+                    for (int i = 0; i < Elements.Count; i++)
+                    {
+                        seed_ms[i] += (r_ref - r[i]) / c * 1000.0;
+                    }
+                }
+
+                for (int i = 0; i < seed_ms.Length; i++)
+                {
+                    seed_ms[i] /= targets.Count;
+                }
+
+                NormalizeDelays(seed_ms);
+
+                double[][] delay_by_element = new double[Elements.Count][];
+                double[][] phase_by_element = new double[Elements.Count][];
+
+                for (int i = 0; i < Elements.Count; i++)
+                {
+                    delay_by_element[i] = new double[8];
+                    phase_by_element[i] = new double[8];
+                }
+
+                for (int oct = 0; oct < 8; oct++)
+                {
+                    double[] delay_ms = new double[seed_ms.Length];
+                    Array.Copy(seed_ms, delay_ms, seed_ms.Length);
+                    double f = 62.5 * Math.Pow(2, oct);
+
+                    if (fineTune)
+                    {
+                        double[] best = new double[delay_ms.Length];
+                        Array.Copy(delay_ms, best, delay_ms.Length);
+
+                        // Start with roughly 45 degrees of phase at this octave.
+                        double step_ms = 45.0 / 360.0 / f * 1000.0;
+
+                        double bestScore = ArrayPatternScore(targets, best, oct);
+
+                        for (int pass = 0; pass < 8; pass++)
+                        {
+                            bool improved = false;
+
+                            for (int i = 0; i < best.Length; i++)
+                            {
+                                double original = best[i];
+
+                                best[i] = original + step_ms;
+                                NormalizeDelays(best);
+                                double plusScore = ArrayPatternScore(targets, best, oct);
+
+                                if (plusScore > bestScore)
+                                {
+                                    bestScore = plusScore;
+                                    improved = true;
+                                    continue;
+                                }
+
+                                best[i] = original - step_ms;
+                                NormalizeDelays(best);
+                                double minusScore = ArrayPatternScore(targets, best, oct);
+
+                                if (minusScore > bestScore)
+                                {
+                                    bestScore = minusScore;
+                                    improved = true;
+                                    continue;
+                                }
+
+                                best[i] = original;
+                                NormalizeDelays(best);
+                            }
+
+                            if (!improved)
+                            {
+                                step_ms *= 0.5;
+                            }
+                        }
+
+                        NormalizeDelays(best);
+                    }
+
+                    NormalizeDelays(delay_ms);
+                    for (int i = 0; i < Elements.Count; i++)
+                    {
+                        delay_by_element[i][oct] = delay_ms[i];
+                        phase_by_element[i][oct] = delay_ms[i] / 1000.0 * f * 360.0;
+                    }
+                }
+
+                for (int i = 0; i < Elements.Count; i++)
+                {
+                    RhinoObject obj = Elements[i];
+
+                    if (obj == null || obj.Geometry == null) continue;
+
+                    obj.Geometry.SetUserString(
+                        "ArrayPhaseOctaveDeg",
+                        PachTools.EncodeEight(phase_by_element[i]));
+
+                    obj.Geometry.SetUserString(
+                        "ArrayDelayOctaveMs",
+                        PachTools.EncodeEight(delay_by_element[i]));
+
+                    EnsureSourceInConduit(obj);
+                }
+
+                RebuildElementEditors();
+                UpdatePatternConduit();
+
+                Rhino.RhinoDoc.ActiveDoc.Views.Redraw();
+            }
+
+            private static void NormalizeDelays(double[] delay)
+            {
+                if (delay == null || delay.Length == 0) return;
+
+                double min = double.PositiveInfinity;
+
+                for (int i = 0; i < delay.Length; i++)
+                {
+                    if (delay[i] < min) min = delay[i];
+                }
+
+                if (double.IsInfinity(min)) return;
+
+                for (int i = 0; i < delay.Length; i++)
+                {
+                    delay[i] -= min;
+                }
+            }
+
+            private double ArrayPatternScore(List<Rhino.Geometry.Point3d> targets, double[] delay_ms, int octave)
+            {
+                double targetPower = 0;
+
+                for (int i = 0; i < targets.Count; i++)
+                {
+                    double mag = ArrayMagnitudeAtPoint(targets[i], delay_ms, octave);
+                    targetPower += mag * mag;
+                }
+
+                targetPower /= Math.Max(1, targets.Count);
+
+                List<double> sidePowers = new List<double>();
+
+                Point3d Center;
+
+                if (Elements == null || Elements.Count == 0) Center = Rhino.Geometry.Point3d.Origin;
+                else
+                {
+                    double x = 0;
+                    double y = 0;
+                    double z = 0;
+                    int count = 0;
+
+                    for (int i = 0; i < Elements.Count; i++)
+                    {
+                        RhinoObject obj = Elements[i];
+
+                        if (obj == null || obj.Geometry == null) continue;
+
+                        Rhino.Geometry.Point3d pt = obj.Geometry.GetBoundingBox(true).Min;
+
+                        x += pt.X;
+                        y += pt.Y;
+                        z += pt.Z;
+                        count++;
+                    }
+                    if (count == 0) Center = Rhino.Geometry.Point3d.Origin;
+                    else Center = new Rhino.Geometry.Point3d(x / count, y / count, z / count);
+                }
+
+                Hare.Geometry.Topology sphere = Utilities.Geometry.GeoSphere(2).Model[0];
+                Rhino.Geometry.Mesh mesh = Utilities.RCPachTools.HaretoRhinoMesh(sphere, true);
+
+                for (int i = 0; i < mesh.Vertices.Count; i++)
+                {
+                    Rhino.Geometry.Vector3d dir = new Rhino.Geometry.Vector3d(mesh.Vertices[i].X, mesh.Vertices[i].Y, mesh.Vertices[i].Z);
+
+                    if (!dir.Unitize()) continue;
+                    double cosLimit = Math.Cos(12.0 * Math.PI / 180.0);
+                    bool limit_exceeded = false;
+
+                    for (int j = 0; j < targets.Count; j++)
+                    {
+                        Rhino.Geometry.Vector3d tdir = targets[j] - Center;
+                        if (!tdir.Unitize()) continue;
+                        if (dir * tdir >= cosLimit) limit_exceeded = true;
+                    }
+
+                    if (limit_exceeded) continue;
+                    Rhino.Geometry.Point3d sample = Center + dir * PatternReferenceDistance.Value;
+                    double mag = ArrayMagnitudeAtPoint(sample, delay_ms, octave);
+                    sidePowers.Add(mag * mag);
+                }
+
+                if (sidePowers.Count == 0)
+                {
+                    return 10.0 * Math.Log10(Math.Max(1E-12, targetPower));
+                }
+
+                sidePowers.Sort();
+                sidePowers.Reverse();
+
+                double maxSide = sidePowers[0];
+
+                int topCount = Math.Max(1, sidePowers.Count / 10);
+                double topSide = 0;
+
+                for (int i = 0; i < topCount; i++)
+                {
+                    topSide += sidePowers[i];
+                }
+
+                topSide /= topCount;
+
+                double targetDb = 10.0 * Math.Log10(Math.Max(1E-12, targetPower));
+                double maxSideDb = 10.0 * Math.Log10(Math.Max(1E-12, maxSide));
+                double topSideDb = 10.0 * Math.Log10(Math.Max(1E-12, topSide));
+
+                double smooth = 0;
+
+                for (int i = 1; i < delay_ms.Length - 1; i++)
+                {
+                    double d2 = delay_ms[i - 1] - 2.0 * delay_ms[i] + delay_ms[i + 1];
+                    smooth += d2 * d2;
+                }
+
+                return targetDb - 0.75 * maxSideDb - 0.15 * topSideDb - 0.02 * smooth;
+            }
+
+            private double ArrayMagnitudeAtPoint(Rhino.Geometry.Point3d target, double[] delay_ms, int octave)
+            {
+                double omega = Utilities.Numerics.angularFrequency_Octave[octave];
+                double k = omega / 343.0;
+
+                System.Numerics.Complex sum = System.Numerics.Complex.Zero;
+
+                for (int i = 0; i < Elements.Count; i++)
+                {
+                    Rhino.Geometry.Point3d src =
+                        Elements[i].Geometry.GetBoundingBox(true).Min;
+
+                    double r = src.DistanceTo(target);
+                    double tau = delay_ms[i] / 1000.0;
+
+                    double phase = -k * r - omega * tau;
+
+                    sum += System.Numerics.Complex.FromPolarCoordinates(1.0, phase);
+                }
+
+                return sum.Magnitude;
             }
 
             private static void EnsureSourceInConduit(Rhino.DocObjects.RhinoObject obj)
@@ -176,13 +474,17 @@ namespace Pachyderm_Acoustic
             private void RebuildElementEditors()
             {
                 ElementLayout = new DynamicLayout();
-                ElementLayout.Padding = 4;
-                ElementLayout.DefaultSpacing = new Eto.Drawing.Size(4, 8);
+                ElementLayout.Padding = 2;
+                ElementLayout.DefaultSpacing = new Eto.Drawing.Size(4, 4);
+
+                List<Control> row = new List<Control>();
 
                 for (int i = 0; i < Elements.Count; i++)
                 {
-                    ElementLayout.AddRow(new ArrayElementEditor(Elements[i], OnElementChanged));
+                    row.Add(new ArrayElementEditor(Elements[i], OnElementChanged));
                 }
+
+                ElementLayout.AddRow(row.ToArray());
 
                 ElementScroll.Content = ElementLayout;
             }
@@ -215,32 +517,6 @@ namespace Pachyderm_Acoustic
                 PatternConduit.Octave = PatternOctave.SelectedIndex;
                 PatternConduit.SetArrayElements(Elements, PatternReferenceDistance.Value);
                 
-            }
-
-            internal static double[] DecodeTriple(string code)
-            {
-                double[] values = new double[3];
-
-                if (string.IsNullOrWhiteSpace(code)) return values;
-
-                string[] parts = code.Split(';');
-
-                for (int i = 0; i < Math.Min(3, parts.Length); i++)
-                {
-                    double.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out values[i]);
-                }
-
-                return values;
-            }
-
-            internal static string EncodeTriple(double[] values)
-            {
-                if (values == null || values.Length < 3)
-                    values = new double[3];
-
-                return values[0].ToString(CultureInfo.InvariantCulture) + ";" +
-                       values[1].ToString(CultureInfo.InvariantCulture) + ";" +
-                       values[2].ToString(CultureInfo.InvariantCulture);
             }
         }
 
@@ -282,8 +558,8 @@ namespace Pachyderm_Acoustic
                     }
                 }
                 DynamicLayout layout = new DynamicLayout();
-                layout.Padding = 8;
-                layout.DefaultSpacing = new Eto.Drawing.Size(4, 6);
+                layout.Padding = 4;
+                layout.DefaultSpacing = new Eto.Drawing.Size(2, 2);
 
                 Alt = NewAngleStepper(-90, 90);
                 Azi = NewAngleStepper(-360, 360);
@@ -293,47 +569,35 @@ namespace Pachyderm_Acoustic
                 Azi.ValueChanged += ValueChanged;
                 Axial.ValueChanged += ValueChanged;
 
-                layout.AddRow(
-                    new Label { Text = "Altitude" }, Alt,
-                    new Label { Text = "Azimuth" }, Azi,
-                    new Label { Text = "Axial" }, Axial);
-
-                DynamicLayout delayTable = new DynamicLayout();
-                delayTable.DefaultSpacing = new Eto.Drawing.Size(4, 4);
-
-                delayTable.AddRow(
-                    new Label { Text = "63" },
-                    new Label { Text = "125" },
-                    new Label { Text = "250" },
-                    new Label { Text = "500" },
-                    new Label { Text = "1k" },
-                    new Label { Text = "2k" },
-                    new Label { Text = "4k" },
-                    new Label { Text = "8k" });
-
                 for (int i = 0; i < 8; i++)
                 {
                     OctPhaseDelay[i] = new NumericStepper();
-                    OctPhaseDelay[i].DecimalPlaces = 2;
-                    OctPhaseDelay[i].MinValue = -720;
-                    OctPhaseDelay[i].MaxValue = 720;
+                    OctPhaseDelay[i].DecimalPlaces = 0;
+                    OctPhaseDelay[i].MinValue = -36000;
+                    OctPhaseDelay[i].MaxValue = 36000;
                     OctPhaseDelay[i].Increment = 5;
-                    OctPhaseDelay[i].Width = 80;
+                    OctPhaseDelay[i].Width = 58;
                     OctPhaseDelay[i].ValueChanged += ValueChanged;
                 }
 
-                delayTable.AddRow(
-                    OctPhaseDelay[0], OctPhaseDelay[1], OctPhaseDelay[2], OctPhaseDelay[3],
-                    OctPhaseDelay[4], OctPhaseDelay[5], OctPhaseDelay[6], OctPhaseDelay[7]);
+                layout.AddRow(new Label { Text = "Alt", Width = 28 }, Alt);
+                layout.AddRow(new Label { Text = "Azi", Width = 28 }, Azi);
+                layout.AddRow(new Label { Text = "Ax", Width = 28 }, Axial);
 
-                GroupBox delayBox = new GroupBox();
-                delayBox.Text = "Octave Phase Lag (degrees)"; 
-                delayBox.Content = delayTable;
+                layout.AddRow(new Label { Text = "Phase °" });
 
-                layout.AddRow(delayBox);
+                layout.AddRow(new Label { Text = "63", Width = 28 }, OctPhaseDelay[0]);
+                layout.AddRow(new Label { Text = "125", Width = 28 }, OctPhaseDelay[1]);
+                layout.AddRow(new Label { Text = "250", Width = 28 }, OctPhaseDelay[2]);
+                layout.AddRow(new Label { Text = "500", Width = 28 }, OctPhaseDelay[3]);
+                layout.AddRow(new Label { Text = "1k", Width = 28 }, OctPhaseDelay[4]);
+                layout.AddRow(new Label { Text = "2k", Width = 28 }, OctPhaseDelay[5]);
+                layout.AddRow(new Label { Text = "4k", Width = 28 }, OctPhaseDelay[6]);
+                layout.AddRow(new Label { Text = "8k", Width = 28 }, OctPhaseDelay[7]);
 
                 Button zeroDelays = new Button();
-                zeroDelays.Text = "Zero Phase";
+                zeroDelays.Text = "Zero";
+                zeroDelays.Width = 58;
                 zeroDelays.Click += (s, e) =>
                 {
                     for (int i = 0; i < 8; i++)
@@ -370,11 +634,11 @@ namespace Pachyderm_Acoustic
             private NumericStepper NewAngleStepper(double min, double max)
             {
                 NumericStepper s = new NumericStepper();
-                s.DecimalPlaces = 3;
+                s.DecimalPlaces = 1;
                 s.MinValue = min;
                 s.MaxValue = max;
                 s.Increment = 1;
-                s.Width = 90;
+                s.Width = 58;
                 return s;
             }
 

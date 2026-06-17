@@ -113,37 +113,6 @@ namespace Pachyderm_Acoustic
                 Rebuild();
             }
 
-            private List<RhinoObject> CurrentArrayObjects()
-            {
-                List<RhinoObject> objects = new List<RhinoObject>();
-
-                if (Array_Object_IDs == null) return objects;
-                if (RhinoDoc.ActiveDoc == null) return objects;
-
-                for (int i = 0; i < Array_Object_IDs.Count; i++)
-                {
-                    RhinoObject obj = RhinoDoc.ActiveDoc.Objects.FindId(Array_Object_IDs[i]);
-
-                    if (obj != null && obj.Geometry != null)
-                    {
-                        objects.Add(obj);
-                    }
-                }
-
-                objects.Sort((a, b) =>
-                {
-                    int ai = 0;
-                    int bi = 0;
-
-                    int.TryParse(a.Geometry.GetUserString("ArrayElementIndex"), out ai);
-                    int.TryParse(b.Geometry.GetUserString("ArrayElementIndex"), out bi);
-
-                    return ai.CompareTo(bi);
-                });
-
-                return objects;
-            }
-
             private static void GetAiming(RhinoObject source, out double alt, out double azi, out double axi)
             {
                 alt = 0;
@@ -541,8 +510,32 @@ namespace Pachyderm_Acoustic
 
                 if (Use_Array_Mode)
                 {
-                    List<RhinoObject> array_objects = CurrentArrayObjects();
-                    if (array_objects == null || array_objects.Count == 0) return;
+                    List<RhinoObject> array_objects = new List<RhinoObject>();
+
+                    if (Array_Object_IDs == null) return;
+                    if (RhinoDoc.ActiveDoc == null) return;
+
+                    for (int i = 0; i < Array_Object_IDs.Count; i++)
+                    {
+                        RhinoObject obj = RhinoDoc.ActiveDoc.Objects.FindId(Array_Object_IDs[i]);
+
+                        if (obj != null && obj.Geometry != null)
+                        {
+                            array_objects.Add(obj);
+                        }
+                    }
+
+                    array_objects.Sort((a, b) =>
+                    {
+                        int ai = 0;
+                        int bi = 0;
+
+                        int.TryParse(a.Geometry.GetUserString("ArrayElementIndex"), out ai);
+                        int.TryParse(b.Geometry.GetUserString("ArrayElementIndex"), out bi);
+
+                        return ai.CompareTo(bi);
+                    });
+
                     BuildBoundaryContoursArray(array_objects, Octave);
                 }
                 else
@@ -717,7 +710,7 @@ namespace Pachyderm_Acoustic
 
                 if (Show_Array_Balloon)
                 {
-                    Hare.Geometry.Topology sphere = Utilities.Geometry.GeoSphere(3).Model[0];
+                    Hare.Geometry.Topology sphere = Utilities.Geometry.GeoSphere(4).Model[0];
 
                     Array_Balloon_Mesh = Utilities.RCPachTools.HaretoRhinoMesh(sphere, true);
 

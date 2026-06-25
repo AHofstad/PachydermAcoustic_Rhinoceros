@@ -15,7 +15,6 @@ build/
 bld/
 [Bb]in/
 [Oo]bj/
-.vs/
 
 # Roslyn cache directories
 *.ide/
@@ -175,7 +174,9 @@ UpgradeLog*.htm
 # SQL Server files
 *.mdf
 *.ldf
-.vs
+
+# Visual Studio
+.vs/
 
 # Business Intelligence projects
 *.rdl.data
@@ -189,13 +190,3 @@ FakesAssemblies/
 GeneratedArtifacts/
 _Pvt_Extensions/
 ModelManifest.xml
-/Pachyderm_Acoustic - Rv5.sln
-/Pachyderm_Acoustic-Rv5.csproj
-/Pachyderm_Acoustic_Rv6.sln
-/Pach_Props_Page_Rv5.cs
-/Pach_Obj_PropsRv5.resx
-/Pach_Obj_PropsRv5.Designer.cs
-/Pach_Obj_PropsRv5.cs
-/Pach_SourceControl_Rv5.cs
-/Pach_SourceControl_Rv5.resx
-/Pach_SourceControl_Rv5.Designer.cs

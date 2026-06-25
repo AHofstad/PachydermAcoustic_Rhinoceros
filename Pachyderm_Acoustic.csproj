@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<TargetFrameworks>net48;net7.0</TargetFrameworks>
+		<TargetFramework>net8.0-windows</TargetFramework>
 		<OutputType>Library</OutputType>
 		<IsWebBootstrapper>false</IsWebBootstrapper>
 		<PublishUrl>publish\</PublishUrl>
@@ -19,16 +19,14 @@
 		<BootstrapperEnabled>true</BootstrapperEnabled>
 		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 		<TargetExt>.rhp</TargetExt>
-		<!--<UseWPF>false</UseWPF>-->
-		<!--ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>-->
 		<GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+	</PropertyGroup>
+	<PropertyGroup>
+		<EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
 	</PropertyGroup>
 	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
 		<WarningLevel>0</WarningLevel>
 		<RegisterForComInterop>false</RegisterForComInterop>
-	</PropertyGroup>
-	<PropertyGroup>
-		<EnableSourceControlManagerQueries>true</EnableSourceControlManagerQueries>
 	</PropertyGroup>
 	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
 		<RegisterForComInterop>false</RegisterForComInterop>
@@ -60,9 +58,6 @@
 		<None Remove="packages\**" />
 	</ItemGroup>
 	<ItemGroup>
-		<Compile Remove="Pach_Absorption_Designer.Designer-PachydermMarch.cs" />
-	</ItemGroup>
-	<ItemGroup>
 		<Reference Include="Eto">
 			<HintPath>..\..\..\..\..\..\Program Files\Rhino 8\System\Eto.dll</HintPath>
 			<Private>False</Private>
@@ -75,60 +70,21 @@
 			<HintPath>..\..\..\..\..\..\Program Files\Rhino 8\System\RhinoCommon.dll</HintPath>
 			<Private>False</Private>
 		</Reference>
-		<!--<Reference Include="CLF_Read">
-			<HintPath>..\PachydermAcoustic_Core\Pachyderm_Acoustic_Universal\Pachyderm_Acoustic_Universal\Resources\CLF_Read.dll</HintPath>
-		</Reference>-->
-		<!--<Reference Update="System.Core">
-      <RequiredTargetFramework>3.5</RequiredTargetFramework>
-    </Reference>
-    <Reference Update="UIAutomationProvider">
-      <RequiredTargetFramework>3.0</RequiredTargetFramework>
-    </Reference>-->
-		<!--</ItemGroup>-->
-		<!--<ItemGroup>
-    <BootstrapperPackage Include="Microsoft.Net.Client.3.5">
-      <Visible>False</Visible>
-      <ProductName>.NET Framework 3.5 SP1 Client Profile</ProductName>
-      <Install>false</Install>
-    </BootstrapperPackage>
-    <BootstrapperPackage Include="Microsoft.Net.Framework.2.0">
-      <Visible>False</Visible>
-      <ProductName>.NET Framework 2.0 %28x86%29</ProductName>
-      <Install>true</Install>
-    </BootstrapperPackage>
-    <BootstrapperPackage Include="Microsoft.Net.Framework.3.0">
-      <Visible>False</Visible>
-      <ProductName>.NET Framework 3.0 %28x86%29</ProductName>
-      <Install>false</Install>
-    </BootstrapperPackage>
-    <BootstrapperPackage Include="Microsoft.Net.Framework.3.5">
-      <Visible>False</Visible>
-      <ProductName>.NET Framework 3.5</ProductName>
-      <Install>false</Install>
-    </BootstrapperPackage>
-    <BootstrapperPackage Include="Microsoft.Net.Framework.3.5.SP1">
-      <Visible>False</Visible>
-      <ProductName>.NET Framework 3.5 SP1</ProductName>
-      <Install>false</Install>
-    </BootstrapperPackage>
-  </ItemGroup>-->
-		<!--<ItemGroup>-->
+		<Reference Include="CLF_Read">
+			<HintPath>..\PachydermAcoustic_Universal\Pachyderm_Acoustic_Universal\Resources\CLF_Read.dll</HintPath>
+			<Private>True</Private>
+		</Reference>
 		<Content Include="Resources\**\*" CopyToOutputDirectory="PreserveNewest" />
 		<Content Include="misc\**\*" CopyToOutputDirectory="PreserveNewest" />
 
 	</ItemGroup>
 	<ItemGroup>
-		<ProjectReference Include="..\CLF_Read_v2.n7\CLF_Read\CLF_Read.csproj" />
 		<ProjectReference Include="..\Hare\Hare.csproj">
 			<Private>True</Private>
 		</ProjectReference>
-		<ProjectReference Include="..\PachydermAcoustic_Core\Pachyderm_Acoustic_Universal\Pachyderm_Acoustic_Universal\Pachyderm_Acoustic_Universal.csproj" />
-		<ProjectReference Include="..\ScottPlot\src\ScottPlot5\ScottPlot5 Controls\ScottPlot.Eto\ScottPlot.Eto.csproj" />
-		<ProjectReference Include="..\ScottPlot\src\ScottPlot5\ScottPlot5\ScottPlot.csproj" />
+		<ProjectReference Include="..\PachydermAcoustic_Universal\Pachyderm_Acoustic_Universal\Pachyderm_Acoustic_Universal.csproj" />
 	</ItemGroup>
 	<ItemGroup>
-		<!--<PackageReference Include="Microsoft-WindowsAPICodePack-Core" Version="1.1.4" />
-    <PackageReference Include="Microsoft-WindowsAPICodePack-Shell" Version="1.1.4" />-->
 		<PackageReference Include="MathNet.Numerics" Version="5.0.0" />
 		<PackageReference Include="System.DirectoryServices" Version="8.0.0" />
 		<PackageReference Include="System.Drawing.Common" Version="7.0.0" />
@@ -136,8 +92,12 @@
 		<PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
 		<PackageReference Include="System.Configuration.ConfigurationManager" Version="8.0.0" />
 		<PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="2.88.9" />
+		<PackageReference Include="ScottPlot" Version="5.0.46" />
+		<!-- ScottPlot.Eto is intentionally NOT referenced: its NuGet package targets
+		     an older, unsigned Eto 2.8 assembly that conflicts with Rhino 8's signed
+		     Eto 2.11. EtoPlot is provided locally instead by ScottPlotEtoShim.cs. -->
 	</ItemGroup>
-	<ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
+	<ItemGroup>
 		<PackageReference Include="NetCoreAudio">
 			<Version>2.0.0</Version>
 		</PackageReference>
@@ -151,14 +111,25 @@
 			<PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
-	<!--<PropertyGroup>
-    <PostBuildEvent>Copy "$(TargetPath)" "$(TargetDir)$(ProjectName).rhp"
-Copy "$(ProjectDir)Resources\libfftw3-3.dll" "$(TargetDir)"</PostBuildEvent>
-    <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
-  </PropertyGroup>-->
 	<PropertyGroup>
 		<RuntimeIdentifier>win-x64</RuntimeIdentifier>
 		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
 		<AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
 	</PropertyGroup>
+	<!-- Deploy the built .rhp + dependencies into Rhino 8's plug-in folder so a
+	     build is immediately picked up by Rhino. Folder name must be "<Name> (<PlugInGuid>)";
+	     GUID matches [assembly: Guid] in Properties\AssemblyInfo.cs. -->
+	<Target Name="DeployToRhino" AfterTargets="Build">
+		<PropertyGroup>
+			<RhinoPluginDir>$(APPDATA)\McNeel\Rhinoceros\8.0\Plug-ins\$(ProjectName) (fefc90ab-b92d-47fb-88fc-90bf6569ee11)</RhinoPluginDir>
+		</PropertyGroup>
+		<Exec Command="if not exist &quot;$(RhinoPluginDir)&quot; mkdir &quot;$(RhinoPluginDir)&quot;" />
+		<Exec Command="Copy /y &quot;$(TargetDir)$(ProjectName).rhp&quot; &quot;$(RhinoPluginDir)\$(ProjectName).rhp&quot;" />
+		<Exec Command="Copy /y &quot;$(TargetDir)*.dll&quot; &quot;$(RhinoPluginDir)\&quot;" />
+		<!-- robocopy returns exit codes 1-7 on success; only >=8 is a real error.
+		     Normalize so MSBuild doesn't treat a successful copy as a build failure. -->
+		<Exec Command="if exist &quot;$(TargetDir)misc&quot; robocopy &quot;$(TargetDir)misc&quot; &quot;$(RhinoPluginDir)\misc&quot; /e /njh /njs /ndl /nc /ns &gt;nul
+if errorlevel 8 exit 1
+exit 0" />
+	</Target>
 </Project>
